@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: piper-tts-config
+data:
+  voice_to_speaker.yaml: |
+    tts-1:
+      alloy:
+        model: pl_PL-gosia-medium
+        speaker: # default
+      onyx:
+        model: pl_PL-darkman-medium
+        speaker: # default
+      nova:
+        model: pl_PL-mc_speech-medium
+        speaker: # default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: piper-tts-pl
+  labels:
+    app: piper-tts-pl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: piper-tts-pl
+  template:
+    metadata:
+      labels:
+        app: piper-tts-pl
+    spec:
+      initContainers:
+        - name: download-pl-voices
+          image: curlimages/curl:latest
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /voices
+              BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/pl/pl_PL"
+
+              # Gosia
+              curl -sL "$BASE_URL/gosia/medium/pl_PL-gosia-medium.onnx" -o /voices/pl_PL-gosia-medium.onnx
+              curl -sL "$BASE_URL/gosia/medium/pl_PL-gosia-medium.onnx.json" -o /voices/pl_PL-gosia-medium.onnx.json
+
+              # Darkman
+              curl -sL "$BASE_URL/darkman/medium/pl_PL-darkman-medium.onnx" -o /voices/pl_PL-darkman-medium.onnx
+              curl -sL "$BASE_URL/darkman/medium/pl_PL-darkman-medium.onnx.json" -o /voices/pl_PL-darkman-medium.onnx.json
+
+              # MC Speech
+              curl -sL "$BASE_URL/mc_speech/medium/pl_PL-mc_speech-medium.onnx" -o /voices/pl_PL-mc_speech-medium.onnx
+              curl -sL "$BASE_URL/mc_speech/medium/pl_PL-mc_speech-medium.onnx.json" -o /voices/pl_PL-mc_speech-medium.onnx.json
+
+              echo "Pobrano pomyślnie:"
+              ls -lh /voices
+          volumeMounts:
+            - name: voices-storage
+              mountPath: /voices
+      containers:
+        - name: openedai-speech
+          image: ghcr.io/matatonic/openedai-speech-min:latest
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: TTS_HOME
+              value: "/app/voices"
+            - name: HF_HOME
+              value: "/app/voices"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config/voice_to_speaker.yaml
+              subPath: voice_to_speaker.yaml
+            - name: voices-storage
+              mountPath: /app/voices
+      volumes:
+        - name: config-volume
+          configMap:
+            name: piper-tts-config
+        - name: voices-storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: piper-tts-pl-svc
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  selector:
+    app: piper-tts-pl
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: piper-ingress
+spec:
+  rules:
+    - host: piper.e495
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: piper-tts-pl-svc
+                port:
+                  number: 8000

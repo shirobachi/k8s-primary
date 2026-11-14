@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kokoro-tts
+  labels:
+    app: kokoro-tts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kokoro-tts
+  template:
+    metadata:
+      labels:
+        app: kokoro-tts
+    spec:
+      containers:
+        - name: kokoro-fastapi
+          image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+          ports:
+            - containerPort: 8880
+              name: http
+          resources:
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kokoro-tts-svc
+  labels:
+    app: kokoro-tts
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8880
+      targetPort: 8880
+      protocol: TCP
+      name: http
+  selector:
+    app: kokoro-tts
+---
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kokoro-ingress
+spec:
+  rules:
+    - host: kokoro.e495
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kokoro-tts-svc
+                port:
+                  number: 8880
